@@ -2,16 +2,23 @@
 use std::sync::Arc;
 
 use async_trait::async_trait;
-use songbird::{events::context_data::{ConnectData, DisconnectData, RtpData, VoiceTick}, model::payload::{ClientDisconnect, Speaking}, Event, EventContext, EventHandler};
-use tokio::sync::Mutex;
+use dashmap::DashMap;
+use songbird::{events::context_data::{ConnectData, DisconnectData, RtpData, VoiceTick}, id::UserId, model::payload::{ClientDisconnect, Speaking}, Event, EventContext, EventHandler};
+use tokio::sync::{mpsc::{UnboundedReceiver, UnboundedSender}, Mutex};
+
 
 pub struct DriverEventHandler {
-    
+    is_recording: bool,
+    ssrcs: DashMap<u32, UserId>,
 }
 
 impl DriverEventHandler {
-    pub fn new() -> Self {
-        Self {}
+    pub fn new() -> Arc<Mutex<Self>> {
+        let new_self = Self {
+            is_recording: false,
+            ssrcs: DashMap::new(),
+        };
+        Arc::new(Mutex::new(new_self))
     }
 
     pub async fn on_client_disconnect(&self, data: &ClientDisconnect) {
@@ -37,6 +44,12 @@ impl DriverEventHandler {
     pub async fn on_driver_disconnect(&self, data: &DisconnectData<'_>) {
         let _ = data;
     }
+
+    pub async fn start_recording(&mut self) {
+        self.ssrcs.clear();
+        self.is_recording = true;
+    }
+
 }
 
 #[derive(Clone)]
@@ -45,9 +58,9 @@ pub struct DriverCallback {
 }
 
 impl DriverCallback {
-    pub fn new(event_handler: DriverEventHandler) -> Self {
+    pub fn new(event_handler: Arc<Mutex<DriverEventHandler>>) -> Self {
         Self {
-            event_handler: Arc::new(Mutex::new(event_handler)),
+            event_handler: event_handler,
         }
     }
 }

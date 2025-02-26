@@ -8,10 +8,14 @@ use axum::Router;
 use futures_util::stream::SplitSink;
 use futures_util::SinkExt;
 use futures_util::StreamExt as _;
+use songbird::CoreEvent;
+use songbird::Event;
 use songbird::{Driver, Config as SongbirdConfig};
 use tokio::sync::mpsc::UnboundedReceiver;
 
 use crate::obj::Config;
+use crate::obj::DriverCallback;
+use crate::obj::DriverEventHandler;
 use crate::obj::WebSocketMessage;
 
 pub fn export_router() -> Router<Config> {
@@ -37,9 +41,21 @@ async fn handle_socket(socket: WebSocket, _config: Config) {
     let (stx, mut srx) = socket.split();
     let (sender, rx_s) = tokio::sync::mpsc::unbounded_channel::<WebSocketMessage>();
     send_task(stx, rx_s).await;
+
     let sb_config  = SongbirdConfig::default();
     let mut driver = Driver::new(sb_config);
+    let event_handler = DriverEventHandler::new();
+    let callback = DriverCallback::new(event_handler.clone());
+
+    driver.add_global_event(Event::Core(CoreEvent::ClientDisconnect), callback.clone());
+    driver.add_global_event(Event::Core(CoreEvent::DriverConnect), callback.clone());
+    driver.add_global_event(Event::Core(CoreEvent::DriverDisconnect), callback.clone());
+    driver.add_global_event(Event::Core(CoreEvent::RtpPacket), callback.clone());
+    driver.add_global_event(Event::Core(CoreEvent::SpeakingStateUpdate), callback.clone());
+    driver.add_global_event(Event::Core(CoreEvent::VoiceTick), callback.clone());
+
     while let Some(Ok(msg)) = srx.next().await {
+
         let text_r = msg.to_text();
         if !text_r.is_err() { drop(sender.clone()); };
         let text = text_r.unwrap();
@@ -48,10 +64,14 @@ async fn handle_socket(socket: WebSocket, _config: Config) {
         let json = json_r.unwrap();
 
 
-        if json.get_event_name() == "VOICE_SERVER_UPDATE" {
+        if json.gen() == "VOICE_SERVER_UPDATE" {
             let voice_server_update = json.voice_server_update().unwrap();
             let connection_info = voice_server_update.to_connection_info();
             driver.connect(connection_info).await.unwrap();
+        } else if json.gen() == "START_RECORDING" {
+            let event_handler = event_handler.lock().await;
+            event_handler.start_recording();
+            drop(event_handler);
         } else {
             drop(sender.clone());
         }

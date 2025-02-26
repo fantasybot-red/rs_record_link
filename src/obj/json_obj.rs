@@ -1,5 +1,5 @@
 #![allow(unused)]
-use serde::{Deserialize, Serialize};
+use serde::{de::Error, Deserialize, Serialize};
 use serde_json::Value;
 use songbird::{driver, id::{GuildId, UserId}};
 
@@ -8,7 +8,7 @@ use songbird::{driver, id::{GuildId, UserId}};
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct WebSocketMessage {
     t: String,
-    d: Value,
+    d: Option<Value>,
 }
 
 impl WebSocketMessage {
@@ -16,16 +16,28 @@ impl WebSocketMessage {
     pub fn new<T: Serialize>(t: String, d: T) -> Self {
         WebSocketMessage {
             t,
-            d: serde_json::to_value(d).unwrap()
+            d: Some(serde_json::to_value(d).unwrap())
         }
     }
 
-    pub fn get_event_name(&self) -> &str {
+    pub fn new_event(t: String) -> Self {
+        WebSocketMessage {
+            t,
+            d: None
+        }
+    }
+
+    pub fn gen(&self) -> &str {
         &self.t
     }
 
     pub fn voice_server_update(&self) -> Result<VoiceServerUpdate, serde_json::Error> {
-        serde_json::from_value(self.d.clone())
+        let data_r = self.d.clone();
+        if data_r.is_none() {
+            return Err(serde_json::Error::custom("No data"));
+        }
+        let data = data_r.unwrap();
+        serde_json::from_value(data)
     }
 
 }
