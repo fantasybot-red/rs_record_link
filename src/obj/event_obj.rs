@@ -1,11 +1,13 @@
 #![allow(dead_code)]
 use std::{
-    fs::File, io::{BufWriter, Seek, Write}, num::NonZero, sync::Arc
+    fs::File,
+    io::{BufWriter, Seek, Write},
+    num::NonZero,
+    sync::Arc,
 };
 
 use async_trait::async_trait;
 use dashmap::DashMap;
-use tokio::task;
 use hound::{WavSpec, WavWriter};
 use songbird::model::id::UserId as VoiceUserId;
 use songbird::{
@@ -15,8 +17,12 @@ use songbird::{
     Event, EventContext, EventHandler,
 };
 use tokio::sync::Mutex;
+use tokio::{sync::mpsc::UnboundedSender, task};
+
+use super::WebSocketMessage;
 
 pub struct DriverEventHandler {
+    senders: UnboundedSender<WebSocketMessage>,
     recording_config: WavSpec,
     bot_id: Option<UserId>,
     is_recording: bool,
@@ -34,7 +40,7 @@ impl DriverEventHandler {
         writer
     }
 
-    pub fn new() -> Arc<Mutex<Self>> {
+    pub fn new(sender: UnboundedSender<WebSocketMessage>) -> Arc<Mutex<Self>> {
         let spec = WavSpec {
             channels: 2,
             sample_rate: 48000,
@@ -42,6 +48,7 @@ impl DriverEventHandler {
             sample_format: hound::SampleFormat::Int,
         };
         let new_self = Self {
+            senders: sender,
             recording_config: spec,
             bot_id: None,
             is_recording: false,
@@ -75,8 +82,9 @@ impl DriverEventHandler {
     pub fn add_emtpy_frame(&mut self) {
         if let Some(ref mut recorder) = self.recorder {
             let rconfig = self.recording_config.clone();
-            let len_audio = (rconfig.sample_rate * rconfig.channels as u32) as usize;
-            let silence = vec![0; len_audio];
+            let duration_ms = 20; // songbird tick duration
+            let len_samples = (rconfig.sample_rate * duration_ms / 1000) * rconfig.channels as u32;
+            let silence = vec![0; len_samples as usize];
             for sample in silence.iter() {
                 recorder.write_sample(*sample).unwrap();
             }
@@ -84,26 +92,22 @@ impl DriverEventHandler {
     }
 
     pub fn merge_audio(data: Vec<Vec<i16>>) -> Vec<i16> {
-    
-        let max_len = data.iter().map(|d| d.len()).max().unwrap_or(0);
-        let mut mixed_audio = vec![0i32; max_len]; // Use i32 to prevent overflow
-    
-        // Mix audio samples
-        for buffer in &data {
-            for (i, &sample) in buffer.iter().enumerate() {
-                mixed_audio[i] += sample as i32;
+        if data.is_empty() {
+            return vec![];
+        }
+
+        let num_channels = data[0].len();
+        let mut mixed_audio = vec![0i16; num_channels];
+
+        for frame in data.iter() {
+            for (i, sample) in frame.iter().enumerate() {
+                mixed_audio[i] = mixed_audio[i].saturating_add(*sample);
             }
         }
-    
-        // Normalize to prevent clipping
-        let mixed_audio: Vec<i16> = mixed_audio
-            .into_iter()
-            .map(|sample| sample.clamp(i16::MIN as i32, i16::MAX as i32) as i16)
-            .collect();
-    
+
         mixed_audio
     }
-    
+
     pub async fn on_voice_tick(&mut self, data: &VoiceTick) {
         if !self.is_recording {
             return;
@@ -117,14 +121,14 @@ impl DriverEventHandler {
             .filter(|x| x.decoded_voice.is_some())
             .map(|x| x.decoded_voice.as_ref().unwrap().clone())
             .collect::<Vec<Vec<i16>>>();
-        let audio_merge = task::spawn_blocking(move || Self::merge_audio(audios)).await.unwrap();
+        let audio_merge = task::spawn_blocking(move || Self::merge_audio(audios))
+            .await
+            .unwrap();
         if let Some(ref mut recorder) = self.recorder {
             for sample in audio_merge {
                 recorder.write_sample(sample).unwrap();
             }
-            if (recorder.duration() % 2 == 0) && (recorder.duration() > 0) {
-                let _ = recorder.flush();
-            }
+            recorder.flush().unwrap();
         }
     }
 

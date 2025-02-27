@@ -45,7 +45,7 @@ pub fn load_dotenv() {
 pub fn setup_logger() {
     if std::env::var("RUST_LOG").is_ok() { return };
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::TRACE)
+        .with_max_level(Level::DEBUG)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)

@@ -8,6 +8,7 @@ use axum::Router;
 use futures_util::stream::SplitSink;
 use futures_util::SinkExt;
 use futures_util::StreamExt as _;
+use songbird::driver::DecodeMode;
 use songbird::CoreEvent;
 use songbird::Event;
 use songbird::{Driver, Config as SongbirdConfig};
@@ -43,9 +44,9 @@ async fn handle_socket(socket: WebSocket, _config: Config) {
     
     send_task(stx, rx_s).await;
 
-    let sb_config  = SongbirdConfig::default();
+    let sb_config  = SongbirdConfig::default().decode_mode(DecodeMode::Decode);
     let mut driver = Driver::new(sb_config);
-    let event_handler = DriverEventHandler::new();
+    let event_handler = DriverEventHandler::new(sender.clone());
     let callback = DriverCallback::new(event_handler.clone());
 
     driver.add_global_event(Event::Core(CoreEvent::ClientDisconnect), callback.clone());
