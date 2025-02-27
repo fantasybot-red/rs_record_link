@@ -116,23 +116,27 @@ impl DriverEventHandler {
         if !self.is_recording {
             return;
         }
+
         let ative = &data.speaking.values().collect::<Vec<&VoiceData>>();
         if ative.len() == 0 {
             return self.add_emtpy_frame();
         }
+
         let audios = ative
             .iter()
             .filter(|x| x.decoded_voice.is_some())
             .map(|x| x.decoded_voice.as_ref().unwrap().clone())
             .collect::<Vec<Vec<i16>>>();
+        
         let audio_merge = task::spawn_blocking(move || Self::merge_audio(audios))
             .await
             .unwrap();
+
         if let Some(ref mut recorder) = self.recorder {
             for sample in audio_merge {
                 recorder.write_sample(sample).unwrap();
             }
-            
+
             recorder.flush().unwrap();
 
             if let Some(limit) = self.recording_limit {
