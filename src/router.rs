@@ -52,8 +52,6 @@ async fn handle_socket(socket: WebSocket, _config: Config) {
     driver.add_global_event(Event::Core(CoreEvent::ClientDisconnect), callback.clone());
     driver.add_global_event(Event::Core(CoreEvent::DriverConnect), callback.clone());
     driver.add_global_event(Event::Core(CoreEvent::DriverDisconnect), callback.clone());
-    driver.add_global_event(Event::Core(CoreEvent::RtpPacket), callback.clone());
-    driver.add_global_event(Event::Core(CoreEvent::SpeakingStateUpdate), callback.clone());
     driver.add_global_event(Event::Core(CoreEvent::VoiceTick), callback.clone());
 
     while let Some(Ok(msg)) = srx.next().await {

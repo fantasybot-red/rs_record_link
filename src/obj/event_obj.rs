@@ -7,13 +7,11 @@ use std::{
 };
 
 use async_trait::async_trait;
-use dashmap::DashMap;
 use hound::{WavSpec, WavWriter};
-use songbird::model::id::UserId as VoiceUserId;
 use songbird::{
-    events::context_data::{ConnectData, DisconnectData, RtpData, VoiceData, VoiceTick},
+    events::context_data::{ConnectData, DisconnectData, VoiceData, VoiceTick},
     id::UserId,
-    model::payload::{ClientDisconnect, Speaking},
+    model::payload::ClientDisconnect,
     Event, EventContext, EventHandler,
 };
 use tokio::sync::Mutex;
@@ -26,7 +24,6 @@ pub struct DriverEventHandler {
     recording_config: WavSpec,
     bot_id: Option<UserId>,
     is_recording: bool,
-    ssrcs: DashMap<u32, VoiceUserId>,
     recording_limit: Option<usize>,
     recorder: Option<WavWriter<BufWriter<File>>>,
     destroy: bool,
@@ -52,7 +49,6 @@ impl DriverEventHandler {
             recording_config: spec,
             bot_id: None,
             is_recording: false,
-            ssrcs: DashMap::new(),
             recording_limit: None,
             recorder: None,
             destroy: false,
@@ -72,6 +68,9 @@ impl DriverEventHandler {
     }
 
     pub fn stop_recording(&mut self) {
+        if !self.is_recording {
+            return;
+        }
         self.is_recording = false;
         if let Some(recorder) = self.recorder.take() {
             let _ = recorder.finalize();
@@ -132,35 +131,25 @@ impl DriverEventHandler {
         }
     }
 
-    pub async fn on_speaking_state_update(&self, data: &Speaking) {
-        let ssrc = data.ssrc;
-        let user_id_r = data.user_id;
-        if user_id_r.is_none() {
-            return;
-        }
-        let user_id = user_id_r.unwrap();
-        self.ssrcs.insert(ssrc, user_id);
-    }
-
-    pub async fn on_rtp_packet(&self, data: &RtpData) {
-        let _ = data;
-        // todo capcher video
-    }
-
     pub async fn on_client_disconnect(&mut self, data: &ClientDisconnect) {
         if let Some(bot_id) = self.bot_id {
             if bot_id.0 == NonZero::new(data.user_id.0).unwrap() {
+                let msg = WebSocketMessage::new_event("DISCONNECTED");
+                let _ = self.senders.send(msg);
                 self.stop_recording();
                 self.destroy = true;
             }
         }
     }
 
-    pub async fn on_driver_connect(&self, data: &ConnectData<'_>) {
-        let _ = data;
+    pub async fn on_driver_connect(&self, _: &ConnectData<'_>) {
+        let msg = WebSocketMessage::new_event("CONNECTED");
+        let _ = self.senders.send(msg);
     }
 
     pub async fn on_driver_disconnect(&mut self, _: &DisconnectData<'_>) {
+        let msg = WebSocketMessage::new_event("DISCONNECTED");
+        let _ = self.senders.send(msg);
         self.stop_recording();
         self.destroy = true;
     }
@@ -187,8 +176,6 @@ impl EventHandler for DriverCallback {
         match ctx {
             EventContext::ClientDisconnect(data) => handler.on_client_disconnect(data).await,
             EventContext::VoiceTick(data) => handler.on_voice_tick(data).await,
-            EventContext::SpeakingStateUpdate(data) => handler.on_speaking_state_update(data).await,
-            EventContext::RtpPacket(data) => handler.on_rtp_packet(data).await,
             EventContext::DriverConnect(data) => handler.on_driver_connect(data).await,
             EventContext::DriverDisconnect(data) => handler.on_driver_disconnect(data).await,
             _ => (),
