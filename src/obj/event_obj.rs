@@ -1,4 +1,3 @@
-#![allow(dead_code)]
 use std::{
     fs::File,
     io::{BufWriter, Seek, Write},
@@ -65,6 +64,9 @@ impl DriverEventHandler {
         let recorder = self.new_recorder(file);
         self.recorder = Some(recorder);
         self.is_recording = true;
+        self.senders
+            .send(WebSocketMessage::new_event("RECORDING_STARTED"))
+            .unwrap();
     }
 
     pub fn stop_recording(&mut self) {
@@ -76,6 +78,9 @@ impl DriverEventHandler {
             let _ = recorder.finalize();
         }
         self.recorder = None;
+        self.senders
+            .send(WebSocketMessage::new_event("RECORDING_STOPPED"))
+            .unwrap();
     }
 
     pub fn add_emtpy_frame(&mut self) {
@@ -127,7 +132,14 @@ impl DriverEventHandler {
             for sample in audio_merge {
                 recorder.write_sample(sample).unwrap();
             }
+            
             recorder.flush().unwrap();
+
+            if let Some(limit) = self.recording_limit {
+                if recorder.len() as usize >= limit {
+                    self.stop_recording();
+                }
+            }
         }
     }
 
