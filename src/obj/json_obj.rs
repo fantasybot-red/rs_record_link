@@ -13,16 +13,16 @@ pub struct WebSocketMessage {
 
 impl WebSocketMessage {
 
-    pub fn new<T: Serialize>(t: String, d: T) -> Self {
+    pub fn new<T: Serialize, S: ToString>(t: S, d: T) -> Self {
         WebSocketMessage {
-            t,
+            t: t.to_string(),
             d: Some(serde_json::to_value(d).unwrap())
         }
     }
 
-    pub fn new_event(t: String) -> Self {
+    pub fn new_event<T: ToString>(t: T) -> Self {
         WebSocketMessage {
-            t,
+            t: t.to_string(),
             d: None
         }
     }
