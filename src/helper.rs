@@ -1,6 +1,5 @@
 use std::fs::exists as file_exists;
-use tracing_subscriber::FmtSubscriber;
-use tracing::Level;
+use tracing_subscriber::{EnvFilter, FmtSubscriber};
 
 pub async fn shutdown_signal() {
     let ctrl_c = async {
@@ -43,9 +42,11 @@ pub fn load_dotenv() {
 }
 
 pub fn setup_logger() {
-    if std::env::var("RUST_LOG").is_ok() { return };
+    let env_filter = EnvFilter::from_default_env()
+        .add_directive("tower_http=debug".parse().unwrap())
+        .add_directive("axum=trace".parse().unwrap()); // use for tracing tower and axum logs
     let subscriber = FmtSubscriber::builder()
-        .with_max_level(Level::DEBUG)
+        .with_env_filter(env_filter)
         .finish();
 
     tracing::subscriber::set_global_default(subscriber)
